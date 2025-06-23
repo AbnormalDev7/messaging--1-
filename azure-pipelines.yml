@@ -1,0 +1,120 @@
+trigger:
+  branches:
+    include:
+      - main
+      - dev
+      - uat
+      - feature/*
+    
+parameters:
+  - name: ManualDeploy
+    type: boolean
+    default: false
+
+  - name: TargetEnvironment
+    type: string
+    default: 'development'
+    values:
+      - development
+      - qa
+      - staging
+      - production
+
+resources:
+  repositories:
+    - repository: framework
+      type: git
+      name: Demo/framework
+      ref: main
+      path: framework
+
+variables:
+  - group: messaging-api-vars
+
+stages:
+
+- stage: Build
+  displayName: 'Build and Package'
+  jobs:
+    - job: BuildJob
+      displayName: 'Build & Publish Artifact'
+      pool:
+        name: $(selfHostedAgentPool)
+        demands:
+          - Agent.OS -equals Windows_NT
+      steps:
+        - checkout: framework
+        - checkout: self
+
+        - task: UseDotNet@2
+          inputs:
+            packageType: 'sdk'
+            version: '5.0.408'
+
+        - task: DotNetCoreCLI@2
+          displayName: 'Restore Solution'
+          inputs:
+            command: restore
+            projects: '$(solution)'
+
+        - task: DotNetCoreCLI@2
+          displayName: 'Build Solution'
+          inputs:
+            command: build
+            projects: '$(solution)'
+            arguments: '--configuration $(buildConfiguration) --no-restore'
+
+        - task: DotNetCoreCLI@2
+          displayName: 'Publish Project'
+          inputs:
+            command: publish
+            projects: '$(solution)'
+            arguments: '--configuration $(buildConfiguration) --runtime win-x64 --self-contained true --output $(Build.ArtifactStagingDirectory)'
+            zipAfterPublish: true
+
+        - task: PublishBuildArtifacts@1
+          displayName: 'Publish Artifact'
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            ArtifactName: 'messaging-artifact'
+            publishLocation: 'Container'
+
+- template: deploy-template.yml
+  parameters:
+    stageName: 'DeployDev'
+    displayName: 'Deploy to Dev'
+    environmentName: 'development'
+    branchName: 'dev'
+    agentTag: 'development'
+    ManualDeploy: ${{ parameters.ManualDeploy }}
+    TargetEnvironment: ${{ parameters.TargetEnvironment }}
+
+- template: deploy-template.yml
+  parameters:
+    stageName: 'DeployQA'
+    displayName: 'Deploy to QA'
+    environmentName: 'qa'
+    branchName: 'dev'
+    agentTag: 'qa'
+    ManualDeploy: ${{ parameters.ManualDeploy }}
+    TargetEnvironment: ${{ parameters.TargetEnvironment }}
+
+- template: deploy-template.yml
+  parameters:
+    stageName: 'DeployStaging'
+    displayName: 'Deploy to Staging'
+    environmentName: 'staging'
+    branchName: 'uat'
+    agentTag: 'staging'
+    ManualDeploy: ${{ parameters.ManualDeploy }}
+    TargetEnvironment: ${{ parameters.TargetEnvironment }}
+
+- template: deploy-template.yml
+  parameters:
+    stageName: 'DeployProd'
+    displayName: 'Deploy to Prod'
+    environmentName: 'production'
+    branchName: 'master'
+    agentTag: 'production'
+    ManualDeploy: ${{ parameters.ManualDeploy }}
+    TargetEnvironment: ${{ parameters.TargetEnvironment }}

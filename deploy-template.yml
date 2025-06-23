@@ -1,0 +1,53 @@
+parameters:
+  stageName: ''
+  displayName: ''
+  environmentName: ''
+  branchName: ''
+  agentTag: ''
+  artifactName: 'messaging-artifact'
+  ManualDeploy: false
+  TargetEnvironment: ''
+
+stages:
+- stage: ${{ parameters.stageName }}
+  displayName: '${{ parameters.displayName }}'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranchName'], '${{ parameters.branchName }}'))
+
+  jobs:
+    - deployment: Deploy
+      displayName: ${{ parameters.displayName }}
+      environment: ${{ parameters.environmentName }}
+      pool:
+        name: $(selfHostedAgentPool)
+        demands:
+          - Agent.Tag -equals ${{ parameters.agentTag }}
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+
+              - download: current
+                artifact: ${{ parameters.artifactName }}
+
+              - task: PowerShell@2
+                displayName: 'Extract and Deploy Artifact'
+                inputs:
+                  targetType: inline
+                  script: |
+                    $artifactPath = "$(Pipeline.Workspace)\${{ parameters.artifactName }}"
+                    $tempPath = "$(tempDeployPath)"
+                    $deployScript = Join-Path $tempPath "deploy.ps1"
+
+                    if (Test-Path $tempPath) { Remove-Item $tempPath -Recurse -Force -ErrorAction SilentlyContinue }
+                    New-Item -ItemType Directory -Path $tempPath -Force | Out-Null
+
+                    Write-Host "Extracting artifact..."
+                    Expand-Archive -Path "$artifactPath\*.zip" -DestinationPath $tempPath -Force
+
+                    if (Test-Path $deployScript) {
+                      Write-Host "Executing deployment script..."
+                      & $deployScript -ServiceName "$(serviceName)-${{ parameters.environmentName }}" -TempPath $tempPath -AppPath "$(appDeployPath)\${{parameters.environmentName}}"
+                    } else {
+                      Write-Warning "deploy.ps1 not found. Deployment script skipped."
+                    }
